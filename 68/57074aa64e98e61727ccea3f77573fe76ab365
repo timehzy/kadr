@@ -1,0 +1,29 @@
+Tests/KadrTests/ClipVolumeTests.swift
+  s_50011662051c2b::t_97f1aab45d8c1f 24-51
+  s_50011662051c2b::t_4bf6e7c61f4354 119-123,133-150
+Sources/Kadr/Engine/CompositionBuilder.swift
+  s_50011662051c2b::t_ac5c838ff7e417 1480
+  s_50011662051c2b::t_3aaec7871a0272 1459,1464
+  s_50011662051c2b::t_686a2bccc0fbf0 1518-1522
+  s_50011662051c2b::t_d192f4f5eec37e 26,28,36-61,63-64
+Tests/KadrTests/NoAudioCompositionExportTests.swift
+  s_50011662051c2b::t_d1a10f49910eec 1-70,72-103,108-128
+  s_50011662051c2b::t_d2e1ef45ca5a19 71
+  s_50011662051c2b::t_8f347b09f90ff2 104-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "6857074aa64e98e61727ccea3f77573fe76ab365",
+  "prompts": {},
+  "sessions": {
+    "s_50011662051c2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2ff0b66-eeff-49cd-913e-d0c768e44bf9",
+        "model": "k3"
+      },
+      "human_author": "HaoZhenyi <haozhenyi@insta360.com>"
+    }
+  }
+}
