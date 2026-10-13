@@ -451,4 +451,75 @@ public struct Video: Sendable {
     public func thumbnail(at time: TimeInterval) async throws -> PlatformImage {
         try await thumbnail(at: CMTime(seconds: time, preferredTimescale: 600))
     }
+
+    // MARK: - Export-fidelity frame rendering
+
+    /// Render a single frame exactly as ``export(to:)`` would encode it — **overlays
+    /// (images, text, captions) baked in**, unlike ``thumbnail(at:)-(CMTime)`` and
+    /// ``makePlayerItem()``, which deliberately exclude them.
+    ///
+    /// The frame is produced from the export path's own construction:
+    /// `CompositionBuilder` builds the composition (transitions, speed, crop), and when
+    /// overlays are present the same layer tree that `ExportEngine` attaches as the
+    /// video composition's animation tool is attached here too. Rendering goes through
+    /// `AVAssetImageGenerator` instead of a full encode, so the cost is one frame, not
+    /// one file — suited for export-verification snapshots and automated visual checks.
+    ///
+    /// Two caveats versus the exported file:
+    /// - The frame is a direct render, not a decode of the encoded bitstream, so it is
+    ///   free of codec compression artifacts (a pixel diff against an exported frame
+    ///   should expect small encoder noise, not structural differences).
+    /// - HDR sources are tone-mapped by the image generator; this is a geometry /
+    ///   composition-truth tool, not an HDR-fidelity tool.
+    ///
+    /// - Parameter time: Composition time of the frame to render.
+    /// - Returns: The frame as a `CGImage` at the preset's render size.
+    /// - Throws: ``KadrError/noClipsProvided`` if the composition has no clips, or any
+    ///   error surfaced by the underlying composition build / image generation.
+    public func renderedFrame(at time: CMTime) async throws -> CGImage {
+        guard !clips.isEmpty else { throw KadrError.noClipsProvided }
+        let cropRect = crop?.resolved(in: preset.resolution)
+        let result = try await CompositionBuilder.build(
+            from: clips,
+            audioTracks: audioTracks,
+            preset: preset,
+            cropRect: cropRect,
+            multiInputCompositor: multiInputCompositor,
+            compositorWindow: compositorWindow
+        )
+        // Mirrors ExportEngine: transitions path already produced a videoComposition;
+        // the simple path builds the shared one here.
+        guard let videoComposition = result.videoComposition
+            ?? PlaybackComposer.buildSimpleVideoComposition(for: result.composition, preset: preset, cropRect: cropRect)
+        else {
+            throw KadrError.exportFailed(underlying: NSError(domain: "Kadr", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track to render a frame from"]))
+        }
+        if !overlays.isEmpty {
+            // Same construction as ExportEngine: fresh layer tree per render —
+            // AVFoundation takes ownership of the animation tool's layers.
+            let renderSize = cropRect?.size ?? preset.resolution
+            let tree = OverlayRenderer.buildLayerTree(
+                overlays: overlays,
+                renderSize: renderSize,
+                compositionDuration: result.composition.duration
+            )
+            videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+                postProcessingAsVideoLayer: tree.videoLayer,
+                in: tree.parent
+            )
+        }
+        let generator = AVAssetImageGenerator(asset: result.composition)
+        generator.videoComposition = videoComposition
+        // Zero tolerance: the default tolerance snaps to the nearest keyframe
+        // (approximate frame), which can land on the wrong clip at edit points.
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        return try await generator.image(at: time).image
+    }
+
+    /// Render a single frame at `time` (seconds) with export fidelity.
+    /// Convenience overload of ``renderedFrame(at:)-(CMTime)``.
+    public func renderedFrame(at time: TimeInterval) async throws -> CGImage {
+        try await renderedFrame(at: CMTime(seconds: time, preferredTimescale: 600))
+    }
 }
