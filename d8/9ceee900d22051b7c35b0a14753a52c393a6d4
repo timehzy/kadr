@@ -1,0 +1,20 @@
+Sources/Kadr/DSL/Video.swift
+  s_bd9efac78efb48::t_1257e08e2400a0 517
+  s_bd9efac78efb48::t_b72a200be78f52 454-516,518-524
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d89ceee900d22051b7c35b0a14753a52c393a6d4",
+  "prompts": {},
+  "sessions": {
+    "s_bd9efac78efb48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b0a8312-b1f7-4362-9823-4c0707582503",
+        "model": "k3"
+      },
+      "human_author": "HaoZhenyi <yiliforever@qq.com>"
+    }
+  }
+}
