@@ -93,8 +93,10 @@ internal enum CompositionBuilder {
             preferredTrackID: kCMPersistentTrackID_Invalid
         )
 
-        // Per-piece video tracks, in declaration order. Used for layer instructions
-        // below — earlier layer instruction = lower (background); later = on top.
+        // Per-piece video tracks, in declaration order: [implicit main chain, parallel tracks...].
+        // Used for layer instructions below — note AVFoundation's `layerInstructions` array
+        // has its FIRST element on TOP, so the array is reversed at emit time to layer the
+        // parallel (overlay / PiP) tracks above the main chain.
         var videoTracks: [AVMutableCompositionTrack] = []
         var clipAudioRanges: [CMTimeRange] = []
         var clipVolumes: [ClipVolume] = []
@@ -106,6 +108,12 @@ internal enum CompositionBuilder {
         // The layer-instruction builder samples animations at preset frame rate within
         // each clip's window. Empty list = pre-v0.8 behavior (base aspect-fill + crop only).
         var trackAnimations: [[ClipAnimationInfo]] = []
+
+        // Per-track content end time, indexed parallel to `videoTracks`. A track whose
+        // content ends before the composition's end must be made transparent from that
+        // point on (the "frame-hold" fix at emit time): otherwise AVFoundation holds the
+        // track's last frame and paints it over the tracks below for the remainder.
+        var trackContentEnds: [CMTime] = []
 
         // 1. Implicit-chain clips → main video track at t=0
         let chained = clips.filter { $0.startTime == nil && !($0 is Track) }
@@ -167,6 +175,7 @@ internal enum CompositionBuilder {
                 }
             }
             trackAnimations.append(chainAnimations)
+            trackContentEnds.append(insertion)
             totalDuration = CMTimeMaximum(totalDuration, insertion)
         }
 
@@ -286,13 +295,16 @@ internal enum CompositionBuilder {
                 ))
             }
             trackAnimations.append(parallelAnimations)
+            trackContentEnds.append(insertion)
 
             totalDuration = CMTimeMaximum(totalDuration, insertion)
         }
 
         // 3. Build the videoComposition with layer instructions for every track. One
-        // instruction spans 0..totalDuration; layer instructions in declaration order so
-        // AVFoundation's default compositor renders later tracks over earlier ones.
+        // instruction spans 0..totalDuration. AVFoundation's `layerInstructions` array is
+        // ordered top-to-bottom: its FIRST element is the topmost layer. `videoTracks` is
+        // [main chain, parallel tracks...], so the array is reversed below to layer the
+        // parallel (overlay / PiP) tracks on top of the main chain.
         //
         // When a user has set a multiInputCompositor on the Video, swap the default
         // AVFoundation compositor for KadrVideoCompositor (which calls into the user
@@ -319,14 +331,32 @@ internal enum CompositionBuilder {
             instruction = AVMutableVideoCompositionInstruction()
         }
         instruction.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
-        instruction.layerInstructions = videoTracks.enumerated().map { (index, track) in
+        // AVFoundation's layerInstructions array has its FIRST element on TOP (Apple:
+        // "the track with the trackID of the first instruction in the array will be
+        // layered on top"). videoTracks is [implicit main chain, parallel tracks...], so
+        // reversing puts the parallel (overlay / PiP) tracks above the main chain.
+        // Previously the array was built in videoTracks order, which kept the main chain
+        // on top and made every overlay track permanently hidden.
+        instruction.layerInstructions = videoTracks.indices.reversed().map { index in
             let infos = trackAnimations.indices.contains(index) ? trackAnimations[index] : []
-            return makeLayerInstruction(
-                for: track,
+            let layer = makeLayerInstruction(
+                for: videoTracks[index],
                 preset: preset,
                 cropTransform: cropTransform,
                 clipAnimations: infos
             )
+            // Frame-hold fix: a track whose content ends before the composition's end
+            // would otherwise have its last frame held and painted over the tracks below
+            // for the remainder (both the default and custom-compositor paths do this).
+            // Drop opacity to 0 at the content end so the track goes transparent there.
+            // Tracks whose content reaches the composition end need no call.
+            if trackContentEnds.indices.contains(index) {
+                let contentEnd = trackContentEnds[index]
+                if CMTimeCompare(contentEnd, totalDuration) < 0 {
+                    layer.setOpacity(0, at: contentEnd)
+                }
+            }
+            return layer
         }
         videoComposition.instructions = [instruction]
 
